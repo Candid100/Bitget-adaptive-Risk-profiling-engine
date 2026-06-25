@@ -1,0 +1,1678 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bitget Adaptive Risk Profiling Engine</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=Outfit:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#05060a;--bg2:#0b0d14;--card:#0c0e17;--card2:#10121c;
+  --border:#161929;--border2:#1e2138;
+  --teal:#00e8b4;--teal-dim:#007a5e;--teal-glow:rgba(0,232,180,.15);
+  --blue:#2d7aff;--blue-dim:#1a4fa0;--blue-glow:rgba(45,122,255,.12);
+  --amber:#ffb020;--amber-dim:#8a6010;--amber-glow:rgba(255,176,32,.12);
+  --red:#ff4757;--red-dim:#a02030;
+  --green:#26de81;--green-dim:#1a8a50;
+  --purple:#a855f7;
+  --text:#e4e4ec;--text2:#9a9ab0;--text3:#555572;
+  --font-data:'JetBrains Mono',monospace;
+  --font-display:'Outfit',sans-serif;
+  --radius:6px;--radius-lg:10px;
+}
+html{font-size:14px;-webkit-font-smoothing:antialiased}
+body{
+  background:var(--bg);color:var(--text);font-family:var(--font-data);
+  min-height:100vh;overflow-x:hidden;
+  background-image:
+    radial-gradient(ellipse 80% 50% at 50% 0%,rgba(0,232,180,.04),transparent),
+    radial-gradient(ellipse 60% 40% at 80% 100%,rgba(45,122,255,.03),transparent);
+}
+::selection{background:var(--teal);color:var(--bg)}
+::-webkit-scrollbar{width:5px}
+::-webkit-scrollbar-track{background:var(--bg2)}
+::-webkit-scrollbar-thumb{background:var(--border2);border-radius:3px}
+
+/* ─── LAYOUT ─── */
+.app{display:flex;flex-direction:column;min-height:100vh;padding:0 20px 20px}
+.grid-main{
+  display:grid;gap:12px;flex:1;
+  grid-template-columns:1fr 1fr 320px;
+  grid-template-rows:auto auto auto auto auto;
+  grid-template-areas:
+    "gauge   radar    patterns"
+    "portfolio behavior recommendations"
+    "shiftfeed shiftfeed recommendations"
+    "sentiment sentiment aichat"
+    "evolution evolution aichat"
+    "correlation stress  decisionlog";
+}
+@media(max-width:1100px){
+  .grid-main{grid-template-columns:1fr 1fr;grid-template-areas:
+    "gauge radar""portfolio behavior""shiftfeed recommendations""patterns patterns"
+    "sentiment sentiment""evolution evolution""aichat aichat""correlation stress""decisionlog decisionlog";}
+}
+@media(max-width:700px){
+  .grid-main{grid-template-columns:1fr;grid-template-areas:
+    "gauge""radar""portfolio""behavior""shiftfeed""recommendations""patterns"
+    "sentiment""evolution""aichat""correlation""stress""decisionlog";}
+}
+
+/* ─── CARD BASE ─── */
+.card{
+  background:var(--card);border:1px solid var(--border);border-radius:var(--radius-lg);
+  padding:18px;position:relative;overflow:hidden;
+  transition:border-color .3s;
+}
+.card::before{
+  content:'';position:absolute;inset:0;
+  background:linear-gradient(135deg,rgba(0,232,180,.02) 0%,transparent 50%);
+  pointer-events:none;
+}
+.card:hover{border-color:var(--border2)}
+.card-label{
+  font-family:var(--font-display);font-size:.7rem;font-weight:700;
+  letter-spacing:.15em;text-transform:uppercase;color:var(--text3);
+  margin-bottom:14px;display:flex;align-items:center;gap:8px;
+}
+.card-label .dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
+.card-label .dot.live{background:var(--teal);box-shadow:0 0 6px var(--teal);animation:pulse-dot 2s infinite}
+.card-label .dot.warn{background:var(--amber);box-shadow:0 0 6px var(--amber);animation:pulse-dot 1.5s infinite}
+
+/* ─── HEADER ─── */
+.header{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:14px 0;margin-bottom:12px;border-bottom:1px solid var(--border);
+  flex-wrap:wrap;gap:10px;
+}
+.header-brand{display:flex;align-items:center;gap:12px}
+.header-logo{
+  width:36px;height:36px;border-radius:8px;
+  background:linear-gradient(135deg,var(--teal),var(--blue));
+  display:flex;align-items:center;justify-content:center;
+  font-family:var(--font-display);font-weight:900;font-size:1rem;color:var(--bg);
+}
+.header-title{font-family:var(--font-display);font-weight:800;font-size:1.15rem;letter-spacing:-.02em}
+.header-sub{font-size:.7rem;color:var(--text3);letter-spacing:.08em;text-transform:uppercase;margin-top:2px}
+.header-status{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+.status-chip{
+  display:flex;align-items:center;gap:6px;font-size:.7rem;
+  padding:4px 10px;border-radius:20px;border:1px solid var(--border);
+  background:var(--bg2);
+}
+.status-chip .indicator{width:5px;height:5px;border-radius:50%}
+.status-chip.active .indicator{background:var(--green);box-shadow:0 0 4px var(--green)}
+.status-chip.adapting .indicator{background:var(--teal);box-shadow:0 0 4px var(--teal);animation:pulse-dot 1s infinite}
+.status-chip.alert .indicator{background:var(--amber);box-shadow:0 0 4px var(--amber);animation:pulse-dot 1.2s infinite}
+.header-time{font-size:.7rem;color:var(--text3);font-variant-numeric:tabular-nums}
+
+/* ─── AREA PLACEMENT ─── */
+.area-gauge{grid-area:gauge}
+.area-radar{grid-area:radar}
+.area-patterns{grid-area:patterns}
+.area-portfolio{grid-area:portfolio}
+.area-behavior{grid-area:behavior}
+.area-recommendations{grid-area:recommendations}
+.area-shiftfeed{grid-area:shiftfeed}
+
+/* ─── RISK GAUGE ─── */
+.gauge-wrap{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:10px 0}
+.gauge-svg{width:220px;height:130px}
+.gauge-score{
+  font-family:var(--font-display);font-size:2.8rem;font-weight:900;
+  line-height:1;margin-top:6px;
+  background:linear-gradient(135deg,var(--teal),var(--blue));
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+}
+.gauge-label-row{display:flex;gap:20px;margin-top:12px;flex-wrap:wrap;justify-content:center}
+.gauge-stat{text-align:center}
+.gauge-stat-val{font-weight:700;font-size:1rem;color:var(--text)}
+.gauge-stat-lbl{font-size:.6rem;color:var(--text3);text-transform:uppercase;letter-spacing:.1em;margin-top:2px}
+.gauge-change{
+  display:inline-flex;align-items:center;gap:3px;font-size:.72rem;font-weight:600;
+  margin-top:4px;padding:2px 7px;border-radius:4px;
+}
+.gauge-change.up{color:var(--green);background:rgba(38,222,129,.1)}
+.gauge-change.down{color:var(--red);background:rgba(255,71,87,.1)}
+.risk-band{display:flex;gap:3px;margin-top:14px;width:100%}
+.risk-band-seg{flex:1;height:4px;border-radius:2px;opacity:.25;transition:opacity .4s}
+.risk-band-seg.active{opacity:1}
+
+/* ─── RADAR CHART ─── */
+.radar-wrap{display:flex;flex-direction:column;align-items:center}
+.radar-svg{width:100%;max-width:240px;aspect-ratio:1}
+.radar-legend{display:flex;flex-wrap:wrap;gap:8px 14px;margin-top:10px;justify-content:center}
+.radar-legend-item{display:flex;align-items:center;gap:5px;font-size:.65rem;color:var(--text2)}
+.radar-legend-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+
+/* ─── PATTERNS ─── */
+.pattern-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.pattern-item{
+  background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);
+  padding:10px 12px;
+}
+.pattern-val{font-weight:700;font-size:1.1rem;font-variant-numeric:tabular-nums}
+.pattern-lbl{font-size:.6rem;color:var(--text3);text-transform:uppercase;letter-spacing:.08em;margin-top:3px}
+.pattern-bar{height:3px;border-radius:2px;background:var(--border);margin-top:8px;overflow:hidden}
+.pattern-bar-fill{height:100%;border-radius:2px;transition:width 1s ease}
+
+/* ─── PORTFOLIO DONUT ─── */
+.portfolio-layout{display:flex;gap:18px;align-items:flex-start;flex-wrap:wrap}
+.donut-wrap{flex-shrink:0;position:relative}
+.donut-svg{width:140px;height:140px}
+.donut-center{
+  position:absolute;inset:0;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;
+}
+.donut-center-val{font-family:var(--font-display);font-weight:800;font-size:1.1rem}
+.donut-center-lbl{font-size:.55rem;color:var(--text3);text-transform:uppercase;letter-spacing:.1em}
+.portfolio-list{flex:1;min-width:140px}
+.portfolio-item{
+  display:flex;align-items:center;gap:8px;padding:6px 0;
+  border-bottom:1px solid var(--border);font-size:.75rem;
+}
+.portfolio-item:last-child{border:none}
+.portfolio-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.portfolio-name{flex:1;color:var(--text2)}
+.portfolio-pct{font-weight:700;font-variant-numeric:tabular-nums}
+.portfolio-change{font-size:.65rem;width:42px;text-align:right}
+
+/* ─── BEHAVIOR HEATMAP ─── */
+.heatmap-wrap{overflow-x:auto}
+.heatmap{display:grid;grid-template-columns:repeat(24,1fr);gap:2px;min-width:340px}
+.heatmap-cell{
+  aspect-ratio:1;border-radius:2px;position:relative;
+  transition:transform .15s;cursor:crosshair;
+}
+.heatmap-cell:hover{transform:scale(1.6);z-index:2}
+.heatmap-labels{display:flex;justify-content:space-between;margin-top:6px;font-size:.55rem;color:var(--text3)}
+.heatmap-row-label{font-size:.55rem;color:var(--text3);writing-mode:vertical-rl;transform:rotate(180deg);display:flex;align-items:center;gap:4px}
+.heatmap-grid-with-labels{display:flex;gap:6px}
+.heatmap-y-labels{display:flex;flex-direction:column;justify-content:space-around;padding:2px 0}
+
+/* ─── RECOMMENDATIONS ─── */
+.reco-feed{display:flex;flex-direction:column;gap:10px;overflow-y:auto;max-height:420px;padding-right:4px}
+.reco-item{
+  background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);
+  padding:12px;position:relative;overflow:hidden;
+  transition:border-color .2s,background .2s;cursor:pointer;
+}
+.reco-item:hover{border-color:var(--border2);background:var(--card2)}
+.reco-item::before{
+  content:'';position:absolute;left:0;top:0;bottom:0;width:3px;
+  border-radius:0 2px 2px 0;
+}
+.reco-item.buy::before{background:var(--green)}
+.reco-item.sell::before{background:var(--red)}
+.reco-item.hold::before{background:var(--amber)}
+.reco-item.rebalance::before{background:var(--blue)}
+.reco-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
+.reco-action{
+  font-size:.6rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;
+  padding:2px 6px;border-radius:3px;
+}
+.reco-item.buy .reco-action{color:var(--green);background:rgba(38,222,129,.12)}
+.reco-item.sell .reco-action{color:var(--red);background:rgba(255,71,87,.12)}
+.reco-item.hold .reco-action{color:var(--amber);background:rgba(255,176,32,.12)}
+.reco-item.rebalance .reco-action{color:var(--blue);background:rgba(45,122,255,.12)}
+.reco-time{font-size:.6rem;color:var(--text3);font-variant-numeric:tabular-nums}
+.reco-title{font-family:var(--font-display);font-weight:600;font-size:.82rem;margin-bottom:4px}
+.reco-reason{font-size:.68rem;color:var(--text2);line-height:1.5}
+.reco-confidence{display:flex;align-items:center;gap:6px;margin-top:8px;font-size:.6rem;color:var(--text3)}
+.reco-conf-bar{flex:1;height:3px;background:var(--border);border-radius:2px;overflow:hidden}
+.reco-conf-fill{height:100%;border-radius:2px}
+
+/* ─── SHIFT FEED ─── */
+.shiftfeed-layout{display:flex;gap:16px;flex-wrap:wrap}
+.shift-chart-wrap{flex:1;min-width:280px}
+.shift-events-wrap{flex:1;min-width:220px;max-height:160px;overflow-y:auto}
+.shift-event{
+  display:flex;gap:10px;padding:7px 0;border-bottom:1px solid var(--border);
+  font-size:.7rem;align-items:flex-start;
+}
+.shift-event:last-child{border:none}
+.shift-event-time{color:var(--text3);flex-shrink:0;width:44px;font-variant-numeric:tabular-nums}
+.shift-event-icon{flex-shrink:0;font-size:.85rem}
+.shift-event-text{color:var(--text2);line-height:1.4}
+.shift-event-text strong{color:var(--text);font-weight:600}
+
+/* ─── MINI CHART (sparkline) ─── */
+.sparkline{display:block}
+
+/* ─── ANIMATIONS ─── */
+@keyframes pulse-dot{0%,100%{opacity:1}50%{opacity:.3}}
+@keyframes fade-in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+@keyframes scan{0%{left:-30%}100%{left:130%}}
+.card{animation:fade-in .5s ease both}
+.card:nth-child(2){animation-delay:.06s}
+.card:nth-child(3){animation-delay:.12s}
+.card:nth-child(4){animation-delay:.18s}
+.card:nth-child(5){animation-delay:.24s}
+.card:nth-child(6){animation-delay:.3s}
+.card:nth-child(7){animation-delay:.36s}
+.card:nth-child(8){animation-delay:.42s}
+.card:nth-child(9){animation-delay:.48s}
+.card:nth-child(10){animation-delay:.54s}
+.card:nth-child(11){animation-delay:.6s}
+
+/* ─── AREA PLACEMENT (new) ─── */
+.area-evolution{grid-area:evolution}
+.area-correlation{grid-area:correlation}
+.area-stress{grid-area:stress}
+.area-decisionlog{grid-area:decisionlog}
+.area-aichat{grid-area:aichat}
+.area-sentiment{grid-area:sentiment}
+
+/* ─── TIMEFRAME SELECTOR ─── */
+.tf-selector{display:flex;gap:4px;margin-left:12px}
+.tf-btn{
+  background:var(--bg2);border:1px solid var(--border);border-radius:4px;
+  color:var(--text3);font-size:.65rem;font-family:var(--font-data);
+  padding:3px 8px;cursor:pointer;transition:all .2s;letter-spacing:.05em;
+}
+.tf-btn:hover{border-color:var(--border2);color:var(--text)}
+.tf-btn.active{background:var(--teal);border-color:var(--teal);color:var(--bg);font-weight:600}
+
+/* ─── RISK EVOLUTION CHART ─── */
+.evolution-layout{display:flex;gap:18px;align-items:stretch;flex-wrap:wrap}
+.evolution-chart-wrap{flex:2;min-width:300px;position:relative}
+.evolution-stats{flex:1;min-width:180px;display:grid;grid-template-rows:repeat(4,1fr);gap:8px}
+.evo-stat-card{
+  background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);
+  padding:10px 12px;display:flex;flex-direction:column;justify-content:center;
+}
+.evo-stat-val{font-weight:700;font-size:1rem;font-variant-numeric:tabular-nums}
+.evo-stat-lbl{font-size:.6rem;color:var(--text3);text-transform:uppercase;letter-spacing:.08em;margin-top:3px}
+.evo-stat-trend{font-size:.65rem;margin-top:3px;font-weight:600}
+.evo-stat-trend.up{color:var(--green)}
+.evo-stat-trend.down{color:var(--red)}
+
+/* ─── CORRELATION MATRIX ─── */
+.corr-matrix{display:grid;gap:2px}
+.corr-cell{
+  aspect-ratio:1;border-radius:3px;display:flex;align-items:center;justify-content:center;
+  font-size:.6rem;font-weight:700;font-variant-numeric:tabular-nums;cursor:crosshair;
+  transition:transform .15s,box-shadow .15s;position:relative;
+}
+.corr-cell:hover{transform:scale(1.3);z-index:2;box-shadow:0 0 12px rgba(0,232,180,.3)}
+.corr-header{
+  font-size:.6rem;color:var(--text3);font-weight:600;
+  display:flex;align-items:center;justify-content:center;
+  font-family:var(--font-display);
+}
+
+/* ─── STRESS TEST ─── */
+.stress-buttons{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px}
+.stress-btn{
+  background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);
+  color:var(--text2);font-size:.68rem;font-family:var(--font-data);
+  padding:8px 12px;cursor:pointer;transition:all .25s;
+  display:flex;align-items:center;gap:6px;flex:1;min-width:110px;justify-content:center;
+}
+.stress-btn:hover{border-color:var(--red);color:var(--red);background:rgba(255,71,87,.06)}
+.stress-btn.active{border-color:var(--red);background:rgba(255,71,87,.12);color:var(--red)}
+.stress-btn .stress-icon{font-size:1rem}
+.stress-result{
+  background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);
+  padding:14px;
+}
+.stress-result-title{font-family:var(--font-display);font-weight:700;font-size:.82rem;margin-bottom:10px}
+.stress-metrics{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.stress-metric{
+  background:var(--card);border:1px solid var(--border);border-radius:4px;
+  padding:8px 10px;
+}
+.stress-metric-val{font-weight:700;font-size:.95rem;font-variant-numeric:tabular-nums}
+.stress-metric-lbl{font-size:.55rem;color:var(--text3);text-transform:uppercase;letter-spacing:.08em;margin-top:3px}
+
+/* ─── DECISION LOG ─── */
+.decision-log{display:flex;flex-direction:column;gap:8px;overflow-y:auto;max-height:380px;padding-right:4px}
+.decision-item{
+  background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);
+  padding:10px 12px;
+}
+.decision-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:5px}
+.decision-time{font-size:.6rem;color:var(--text3);font-variant-numeric:tabular-nums}
+.decision-tag{
+  font-size:.55rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;
+  padding:2px 6px;border-radius:3px;
+}
+.decision-tag.risk-up{color:var(--red);background:rgba(255,71,87,.12)}
+.decision-tag.risk-down{color:var(--green);background:rgba(38,222,129,.12)}
+.decision-tag.neutral{color:var(--amber);background:rgba(255,176,32,.12)}
+.decision-tag.profile{color:var(--blue);background:rgba(45,122,255,.12)}
+.decision-text{font-size:.7rem;color:var(--text2);line-height:1.5}
+.decision-text strong{color:var(--text);font-weight:600}
+.decision-impact{display:flex;align-items:center;gap:6px;margin-top:6px;font-size:.6rem;color:var(--text3)}
+.decision-impact-bar{flex:1;height:3px;background:var(--border);border-radius:2px;overflow:hidden}
+.decision-impact-fill{height:100%;border-radius:2px}
+
+/* Scan line effect on gauge card */
+.area-gauge::after{
+  content:'';position:absolute;top:0;width:30%;height:100%;
+  background:linear-gradient(90deg,transparent,rgba(0,232,180,.03),transparent);
+  animation:scan 4s linear infinite;pointer-events:none;
+}
+
+/* ─── NOTIFICATION TOAST ─── */
+#notifContainer{
+  position:fixed;top:20px;right:20px;z-index:9999;
+  display:flex;flex-direction:column;gap:8px;pointer-events:none;
+}
+.notif-toast{
+  background:var(--card);border:1px solid var(--border2);
+  border-radius:var(--radius-lg);padding:12px 16px;
+  min-width:280px;max-width:340px;
+  box-shadow:0 8px 32px rgba(0,0,0,.5);
+  pointer-events:all;
+  animation:toast-in .35s cubic-bezier(.34,1.56,.64,1) both;
+  display:flex;gap:10px;align-items:flex-start;
+}
+.notif-toast.exiting{animation:toast-out .3s ease forwards}
+@keyframes toast-in{from{opacity:0;transform:translateX(60px)}to{opacity:1;transform:none}}
+@keyframes toast-out{from{opacity:1;transform:none}to{opacity:0;transform:translateX(60px)}}
+.notif-icon{font-size:1.1rem;flex-shrink:0;margin-top:1px}
+.notif-body{flex:1}
+.notif-title{font-family:var(--font-display);font-weight:700;font-size:.78rem;margin-bottom:3px}
+.notif-msg{font-size:.68rem;color:var(--text2);line-height:1.4}
+.notif-close{background:none;border:none;color:var(--text3);cursor:pointer;font-size:.85rem;padding:0;line-height:1;flex-shrink:0}
+.notif-close:hover{color:var(--text)}
+.notif-toast.level-warn .notif-title{color:var(--amber)}
+.notif-toast.level-alert .notif-title{color:var(--red)}
+.notif-toast.level-info .notif-title{color:var(--teal)}
+.notif-toast.level-success .notif-title{color:var(--green)}
+.notif-bar{height:3px;border-radius:0 0 var(--radius-lg) var(--radius-lg);
+  position:absolute;bottom:0;left:0;right:0;overflow:hidden;}
+.notif-bar-fill{height:100%;border-radius:3px;animation:notif-drain 5s linear forwards}
+@keyframes notif-drain{from{width:100%}to{width:0%}}
+.notif-toast.level-warn .notif-bar-fill{background:var(--amber)}
+.notif-toast.level-alert .notif-bar-fill{background:var(--red)}
+.notif-toast.level-info .notif-bar-fill{background:var(--teal)}
+.notif-toast.level-success .notif-bar-fill{background:var(--green)}
+
+/* ─── AI CHAT PANEL ─── */
+.aichat-wrap{display:flex;flex-direction:column;height:100%;min-height:300px}
+.aichat-messages{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:10px;padding-right:4px;margin-bottom:10px;max-height:320px}
+.chat-msg{display:flex;gap:8px;align-items:flex-start}
+.chat-msg.user{flex-direction:row-reverse}
+.chat-avatar{
+  width:26px;height:26px;border-radius:50%;flex-shrink:0;
+  display:flex;align-items:center;justify-content:center;font-size:.65rem;font-weight:700;
+}
+.chat-avatar.ai{background:linear-gradient(135deg,var(--teal),var(--blue));color:var(--bg)}
+.chat-avatar.user{background:var(--bg2);border:1px solid var(--border2);color:var(--text2)}
+.chat-bubble{
+  padding:8px 12px;border-radius:12px;font-size:.72rem;line-height:1.55;max-width:85%;
+}
+.chat-msg.ai .chat-bubble{background:var(--bg2);border:1px solid var(--border);color:var(--text2);border-radius:4px 12px 12px 12px}
+.chat-msg.user .chat-bubble{background:rgba(0,232,180,.12);border:1px solid var(--teal-dim);color:var(--text);border-radius:12px 4px 12px 12px}
+.chat-thinking{display:flex;gap:4px;align-items:center;padding:10px 12px}
+.chat-thinking span{width:6px;height:6px;border-radius:50%;background:var(--teal);animation:think .9s ease-in-out infinite}
+.chat-thinking span:nth-child(2){animation-delay:.15s}
+.chat-thinking span:nth-child(3){animation-delay:.3s}
+@keyframes think{0%,80%,100%{opacity:.2;transform:scale(.8)}40%{opacity:1;transform:scale(1)}}
+.aichat-input-row{display:flex;gap:8px}
+.aichat-input{
+  flex:1;background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);
+  color:var(--text);font-family:var(--font-data);font-size:.72rem;padding:8px 10px;
+  outline:none;transition:border-color .2s;resize:none;
+}
+.aichat-input:focus{border-color:var(--teal)}
+.aichat-input::placeholder{color:var(--text3)}
+.aichat-send{
+  background:linear-gradient(135deg,var(--teal),var(--blue));border:none;
+  border-radius:var(--radius);padding:8px 14px;color:var(--bg);
+  font-weight:700;font-size:.72rem;cursor:pointer;font-family:var(--font-data);
+  transition:opacity .2s;flex-shrink:0;
+}
+.aichat-send:hover{opacity:.85}
+.aichat-send:disabled{opacity:.4;cursor:not-allowed}
+.chat-quickbtns{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:10px}
+.chat-quick{
+  background:var(--bg2);border:1px solid var(--border);border-radius:20px;
+  color:var(--text3);font-size:.6rem;font-family:var(--font-data);
+  padding:3px 9px;cursor:pointer;transition:all .2s;
+}
+.chat-quick:hover{border-color:var(--teal);color:var(--teal)}
+
+/* ─── MARKET SENTIMENT ─── */
+.sentiment-layout{display:flex;gap:16px;align-items:center;flex-wrap:wrap}
+.sentiment-gauge-wrap{flex-shrink:0;text-align:center}
+.sentiment-score-big{
+  font-family:var(--font-display);font-weight:900;font-size:2.2rem;line-height:1;
+}
+.sentiment-label{font-size:.7rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;margin-top:4px}
+.sentiment-tokens{flex:1;display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;min-width:280px}
+.sent-token{
+  background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);
+  padding:8px 10px;display:flex;align-items:center;gap:8px;
+}
+.sent-token-icon{width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:.72rem;font-weight:700;flex-shrink:0}
+.sent-token-info{flex:1}
+.sent-token-name{font-size:.65rem;color:var(--text3);text-transform:uppercase;letter-spacing:.08em}
+.sent-token-score{font-weight:700;font-size:.9rem;font-variant-numeric:tabular-nums}
+.sent-token-bar{height:2px;border-radius:1px;background:var(--border);margin-top:5px;overflow:hidden}
+.sent-token-fill{height:100%;border-radius:1px;transition:width 1s ease}
+.sentiment-history{display:flex;gap:2px;align-items:flex-end;height:36px;margin-top:10px}
+.sentiment-history-bar{flex:1;border-radius:1px 1px 0 0;min-width:4px;transition:height .5s ease}
+.fear-greed-arc{width:120px;height:70px}
+
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- HEADER -->
+  <header class="header">
+    <div class="header-brand">
+      <div class="header-logo">B</div>
+      <div>
+        <div class="header-title">Adaptive Risk Profiling Engine</div>
+        <div class="header-sub">Bitget Ecosystem &middot; AI-Driven Portfolio Intelligence</div>
+      </div>
+    </div>
+    <div class="header-status">
+      <div class="status-chip active"><span class="indicator"></span>Engine Online</div>
+      <div class="status-chip adapting"><span class="indicator"></span>AI Adapting</div>
+      <div class="status-chip alert"><span class="indicator"></span>Volatility Elevated</div>
+      <div class="tf-selector" id="tfSelector">
+        <button class="tf-btn active" data-tf="1H">1H</button>
+        <button class="tf-btn" data-tf="24H">24H</button>
+        <button class="tf-btn" data-tf="7D">7D</button>
+        <button class="tf-btn" data-tf="30D">30D</button>
+      </div>
+      <button class="tf-btn" onclick="savePortfolio()" style="border-color:var(--teal);color:var(--teal)" title="Save portfolio to cloud">💾 Save</button>
+      <button class="tf-btn" onclick="loadPortfolio()" title="Load saved portfolio">📂 Load</button>
+      <div class="header-time" id="headerTime">--:--:--</div>
+    </div>
+  </header>
+
+  <!-- MAIN GRID -->
+  <div class="grid-main">
+
+    <!-- RISK GAUGE -->
+    <div class="card area-gauge">
+      <div class="card-label"><span class="dot live"></span>Composite Risk Profile</div>
+      <div class="gauge-wrap">
+        <svg class="gauge-svg" viewBox="0 0 220 120" id="gaugeSvg">
+          <!-- Background arc -->
+          <path d="M20,110 A90,90 0 0,1 200,110" fill="none" stroke="#161929" stroke-width="14" stroke-linecap="round"/>
+          <!-- Colored arc segments -->
+          <path d="M20,110 A90,90 0 0,1 65,28" fill="none" stroke="#26de81" stroke-width="14" stroke-linecap="round" opacity=".2" id="gSeg1"/>
+          <path d="M65,28 A90,90 0 0,1 155,28" fill="none" stroke="#ffb020" stroke-width="14" stroke-linecap="round" opacity=".2" id="gSeg2"/>
+          <path d="M155,28 A90,90 0 0,1 200,110" fill="none" stroke="#ff4757" stroke-width="14" stroke-linecap="round" opacity=".2" id="gSeg3"/>
+          <!-- Active indicator arc -->
+          <path d="M20,110 A90,90 0 0,1 200,110" fill="none" stroke="url(#gaugeGrad)" stroke-width="14" stroke-linecap="round" stroke-dasharray="283" stroke-dashoffset="283" id="gaugeArc"/>
+          <!-- Needle -->
+          <line x1="110" y1="110" x2="110" y2="30" stroke="var(--teal)" stroke-width="2" stroke-linecap="round" id="gaugeNeedle" transform="rotate(-90,110,110)"/>
+          <circle cx="110" cy="110" r="5" fill="var(--teal)"/>
+          <defs>
+            <linearGradient id="gaugeGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+              <stop offset="0%" stop-color="#26de81"/>
+              <stop offset="50%" stop-color="#ffb020"/>
+              <stop offset="100%" stop-color="#ff4757"/>
+            </linearGradient>
+          </defs>
+        </svg>
+        <div class="gauge-score" id="gaugeScore">--</div>
+        <div class="gauge-change up" id="gaugeChange">&#9650; +2.4 vs last hour</div>
+        <div class="gauge-label-row">
+          <div class="gauge-stat"><div class="gauge-stat-val" id="gsVolatility">--</div><div class="gauge-stat-lbl">Volatility</div></div>
+          <div class="gauge-stat"><div class="gauge-stat-val" id="gsExposure">--</div><div class="gauge-stat-lbl">Exposure</div></div>
+          <div class="gauge-stat"><div class="gauge-stat-val" id="gsLiquidity">--</div><div class="gauge-stat-lbl">Liquidity</div></div>
+          <div class="gauge-stat"><div class="gauge-stat-val" id="gsDrawdown">--</div><div class="gauge-stat-lbl">Max DD</div></div>
+        </div>
+        <div class="risk-band" id="riskBand"></div>
+      </div>
+    </div>
+
+    <!-- RADAR CHART -->
+    <div class="card area-radar">
+      <div class="card-label"><span class="dot live"></span>Risk Factor Analysis</div>
+      <div class="radar-wrap">
+        <svg class="radar-svg" viewBox="0 0 240 240" id="radarSvg"></svg>
+        <div class="radar-legend" id="radarLegend"></div>
+      </div>
+    </div>
+
+    <!-- TRADING PATTERNS -->
+    <div class="card area-patterns">
+      <div class="card-label"><span class="dot live"></span>Trading Pattern Summary</div>
+      <div class="pattern-grid" id="patternGrid"></div>
+    </div>
+
+    <!-- PORTFOLIO ALLOCATION -->
+    <div class="card area-portfolio">
+      <div class="card-label"><span class="dot live"></span>Dynamic Portfolio Allocation</div>
+      <div class="portfolio-layout">
+        <div class="donut-wrap">
+          <svg class="donut-svg" viewBox="0 0 140 140" id="donutSvg"></svg>
+          <div class="donut-center">
+            <div class="donut-center-val" id="donutTotal">--</div>
+            <div class="donut-center-lbl">Assets</div>
+          </div>
+        </div>
+        <div class="portfolio-list" id="portfolioList"></div>
+      </div>
+    </div>
+
+    <!-- BEHAVIOR HEATMAP -->
+    <div class="card area-behavior">
+      <div class="card-label"><span class="dot warn"></span>Behavior Intensity Heatmap &middot; 7-Day</div>
+      <div class="heatmap-wrap">
+        <div class="heatmap-grid-with-labels">
+          <div class="heatmap-y-labels" id="heatmapYLabels"></div>
+          <div>
+            <div class="heatmap" id="heatmap" style="grid-template-rows:repeat(4,1fr)"></div>
+            <div class="heatmap-labels" id="heatmapXLabels"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- RECOMMENDATIONS -->
+    <div class="card area-recommendations" style="display:flex;flex-direction:column">
+      <div class="card-label"><span class="dot live"></span>AI Recommendations</div>
+      <div class="reco-feed" id="recoFeed"></div>
+    </div>
+
+    <!-- MARKET SHIFT FEED -->
+    <div class="card area-shiftfeed">
+      <div class="card-label"><span class="dot warn"></span>Market Shift Detector</div>
+      <div class="shiftfeed-layout">
+        <div class="shift-chart-wrap">
+          <svg width="100%" height="120" id="shiftChart" style="display:block"></svg>
+        </div>
+        <div class="shift-events-wrap" id="shiftEvents"></div>
+      </div>
+    </div>
+
+    <!-- RISK PROFILE EVOLUTION -->
+    <div class="card area-evolution">
+      <div class="card-label"><span class="dot live"></span>Risk Profile Evolution &middot; <span id="evoTimeframe">1H</span></div>
+      <div class="evolution-layout">
+        <div class="evolution-chart-wrap">
+          <svg width="100%" height="180" id="evolutionChart" style="display:block"></svg>
+          <div style="display:flex;justify-content:space-between;margin-top:6px">
+            <span style="font-size:.55rem;color:var(--text3)">— AI-Assessed Risk</span>
+            <span style="font-size:.55rem;color:var(--blue)">— User Tolerance</span>
+          </div>
+        </div>
+        <div class="evolution-stats" id="evoStats">
+          <div class="evo-stat-card">
+            <div class="evo-stat-val" id="evoAvg">--</div>
+            <div class="evo-stat-lbl">Avg Risk Score</div>
+            <div class="evo-stat-trend up" id="evoAvgTrend">--</div>
+          </div>
+          <div class="evo-stat-card">
+            <div class="evo-stat-val" id="evoMin">--</div>
+            <div class="evo-stat-lbl">Period Low</div>
+            <div class="evo-stat-trend down" id="evoMinTrend">--</div>
+          </div>
+          <div class="evo-stat-card">
+            <div class="evo-stat-val" id="evoMax">--</div>
+            <div class="evo-stat-lbl">Period High</div>
+            <div class="evo-stat-trend up" id="evoMaxTrend">--</div>
+          </div>
+          <div class="evo-stat-card">
+            <div class="evo-stat-val" id="evoAdapt">--</div>
+            <div class="evo-stat-lbl">AI Adaptations</div>
+            <div class="evo-stat-trend" id="evoAdaptTrend" style="color:var(--teal)">--</div>
+          </div>
+        </div>
+      </div>
+      <!-- Interactive Risk Tolerance Slider -->
+      <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--border)">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:8px">
+          <span style="font-size:.7rem;color:var(--text2);font-family:var(--font-display);font-weight:600">Adjust Your Risk Tolerance</span>
+          <span style="font-size:.85rem;font-weight:700;color:var(--blue)" id="toleranceVal">65</span>
+        </div>
+        <input type="range" id="toleranceSlider" min="10" max="95" value="65" style="width:100%;accent-color:var(--teal);cursor:pointer">
+        <div style="display:flex;justify-content:space-between;margin-top:6px;font-size:.55rem;color:var(--text3)">
+          <span>Conservative</span><span>Balanced</span><span>Aggressive</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- CORRELATION MATRIX -->
+    <div class="card area-correlation">
+      <div class="card-label"><span class="dot live"></span>Asset Correlation Matrix</div>
+      <div id="corrMatrix"></div>
+      <div style="display:flex;justify-content:space-between;margin-top:10px;font-size:.55rem;color:var(--text3)">
+        <span style="color:#26de81">-1.0 (Inverse)</span>
+        <span style="color:var(--text3)">0.0</span>
+        <span style="color:#ff4757">+1.0 (Perfect)</span>
+      </div>
+    </div>
+
+    <!-- STRESS TEST SIMULATOR -->
+    <div class="card area-stress">
+      <div class="card-label"><span class="dot warn"></span>Stress Test Simulator</div>
+      <div class="stress-buttons" id="stressButtons">
+        <button class="stress-btn" data-scenario="crash"><span class="stress-icon">💥</span>Flash Crash<br><span style="font-size:.55rem;color:var(--text3)">-30% BTC</span></button>
+        <button class="stress-btn" data-scenario="liquidity"><span class="stress-icon">🌊</span>Liquidity Crisis<br><span style="font-size:.55rem;color:var(--text3)">Spread 5x</span></button>
+        <button class="stress-btn" data-scenario="blackswan"><span class="stress-icon">🦢</span>Black Swan<br><span style="font-size:.55rem;color:var(--text3)">-50% all</span></button>
+        <button class="stress-btn" data-scenario="regulation"><span class="stress-icon">⚖️</span>Regulation Shock<br><span style="font-size:.55rem;color:var(--text3)">Ban risk</span></button>
+      </div>
+      <div class="stress-result" id="stressResult" style="display:none">
+        <div class="stress-result-title" id="stressResultTitle">Scenario Impact</div>
+        <div class="stress-metrics" id="stressMetrics"></div>
+      </div>
+      <div id="stressIdle" style="text-align:center;padding:20px;color:var(--text3);font-size:.72rem">
+        Select a scenario to simulate portfolio impact
+      </div>
+    </div>
+
+    <!-- AI DECISION LOG -->
+    <div class="card area-decisionlog">
+      <div class="card-label"><span class="dot live"></span>AI Decision Log</div>
+      <div class="decision-log" id="decisionLog"></div>
+    </div>
+
+    <!-- MARKET SENTIMENT PANEL -->
+    <div class="card area-sentiment">
+      <div class="card-label"><span class="dot warn"></span>Market Sentiment · Fear &amp; Greed Index</div>
+      <div class="sentiment-layout">
+        <div class="sentiment-gauge-wrap">
+          <svg class="fear-greed-arc" viewBox="0 0 120 70" id="sentGaugeSvg">
+            <path d="M10,60 A50,50 0 0,1 110,60" fill="none" stroke="#161929" stroke-width="12" stroke-linecap="round"/>
+            <path d="M10,60 A50,50 0 0,1 110,60" fill="none" stroke="url(#sentGrad)" stroke-width="12" stroke-linecap="round" stroke-dasharray="157" stroke-dashoffset="157" id="sentArc" style="transition:stroke-dashoffset 1.5s ease"/>
+            <defs><linearGradient id="sentGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+              <stop offset="0%" stop-color="#ff4757"/><stop offset="50%" stop-color="#ffb020"/><stop offset="100%" stop-color="#26de81"/>
+            </linearGradient></defs>
+          </svg>
+          <div class="sentiment-score-big" id="sentScore">--</div>
+          <div class="sentiment-label" id="sentLabel" style="color:var(--amber)">Neutral</div>
+          <div class="sentiment-history" id="sentHistory"></div>
+        </div>
+        <div class="sentiment-tokens" id="sentTokens"></div>
+      </div>
+    </div>
+
+    <!-- AI CHAT ASSISTANT -->
+    <div class="card area-aichat" style="display:flex;flex-direction:column">
+      <div class="card-label"><span class="dot live"></span>AI Portfolio Analyst</div>
+      <div class="chat-quickbtns" id="chatQuickBtns">
+        <button class="chat-quick" onclick="sendQuick('Summarize my risk profile')">📊 Risk Summary</button>
+        <button class="chat-quick" onclick="sendQuick('What should I do now?')">🎯 Next Action</button>
+        <button class="chat-quick" onclick="sendQuick('Explain the stress test results')">💥 Stress Test</button>
+        <button class="chat-quick" onclick="sendQuick('Is my portfolio diversified enough?')">🔀 Diversification</button>
+      </div>
+      <div class="aichat-wrap">
+        <div class="aichat-messages" id="chatMessages">
+          <div class="chat-msg ai">
+            <div class="chat-avatar ai">AI</div>
+            <div class="chat-bubble">Hello! I'm your Bitget AI Portfolio Analyst. I have real-time access to your risk metrics, portfolio allocation, and market data. Ask me anything about your positions or risk profile.</div>
+          </div>
+        </div>
+        <div class="aichat-input-row">
+          <textarea class="aichat-input" id="chatInput" rows="2" placeholder="Ask about your portfolio, risk, or market conditions…"></textarea>
+          <button class="aichat-send" id="chatSendBtn" onclick="sendChatMessage()">Send</button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- NOTIFICATION CONTAINER -->
+<div id="notifContainer"></div>
+<script>
+// ══════════════════════════════════════════════
+// DATA & STATE
+// ══════════════════════════════════════════════
+const STATE = {
+  riskScore: 62,
+  riskTarget: 62,
+  volatility: 0.74,
+  exposure: 0.58,
+  liquidity: 0.82,
+  drawdown: -12.3,
+  radarFactors: [
+    { name: 'Market Risk', value: 0.72, color: '#ff4757' },
+    { name: 'Liquidity', value: 0.82, color: '#00e8b4' },
+    { name: 'Concentration', value: 0.45, color: '#2d7aff' },
+    { name: 'Leverage', value: 0.38, color: '#a855f7' },
+    { name: 'Volatility', value: 0.68, color: '#ffb020' },
+    { name: 'Correlation', value: 0.55, color: '#26de81' },
+  ],
+  portfolio: [
+    { name: 'BTC', pct: 32, change: 2.4, color: '#f7931a' },
+    { name: 'ETH', pct: 22, change: 1.8, color: '#627eea' },
+    { name: 'SOL', pct: 14, change: -3.2, color: '#9945ff' },
+    { name: 'USDT (Stable)', pct: 18, change: 0.01, color: '#26de81' },
+    { name: 'ALT Basket', pct: 8, change: 5.1, color: '#2d7aff' },
+    { name: 'Futures Hedge', pct: 6, change: -0.8, color: '#ff4757' },
+  ],
+  patterns: [
+    { label: 'Trade Freq (24h)', value: '47', pct: 0.67, color: 'var(--teal)' },
+    { label: 'Avg Position Size', value: '$4.2K', pct: 0.52, color: 'var(--blue)' },
+    { label: 'Win Rate (7d)', value: '63%', pct: 0.63, color: 'var(--green)' },
+    { label: 'Leverage Avg', value: '3.2x', pct: 0.32, color: 'var(--purple)' },
+    { label: 'Session Length', value: '6.4h', pct: 0.54, color: 'var(--amber)' },
+    { label: 'Risk/Trade', value: '1.8%', pct: 0.36, color: 'var(--red)' },
+  ],
+  recommendations: [
+    { type: 'rebalance', title: 'Reduce SOL Exposure', reason: 'Correlation with ETH exceeds 0.89. Consider rotating 4% into stable yield.', confidence: 0.87, time: '2m ago' },
+    { type: 'buy', title: 'DCA into BTC', reason: 'Risk profile shifted conservative. Current dip aligns with long-term accumulation zone.', confidence: 0.92, time: '8m ago' },
+    { type: 'hold', title: 'Maintain Futures Hedge', reason: 'Elevated vol regime detected. Your 6% hedge provides adequate downside protection.', confidence: 0.78, time: '14m ago' },
+    { type: 'sell', title: 'Trim ALT Basket', reason: 'Altcoin dominance falling. ALT basket risk exceeds your updated tolerance.', confidence: 0.81, time: '22m ago' },
+    { type: 'rebalance', title: 'Increase Stable Yield', reason: 'Move 3% from ALT to Bitget Earn. Adaptive model favors capital preservation.', confidence: 0.74, time: '31m ago' },
+  ],
+  shiftEvents: [
+    { time: '14:32', icon: '⚡', text: '<strong>Volatility spike</strong> detected on SOL — adjusting risk weight' },
+    { time: '14:28', icon: '📊', text: 'BTC dominance <strong>rose 0.3%</strong> — rebalancing signal triggered' },
+    { time: '14:15', icon: '🔄', text: 'Portfolio <strong>correlation matrix</strong> updated — 6 pairs above threshold' },
+    { time: '13:58', icon: '⚠️', text: '<strong>Leverage exposure</strong> near limit — risk score adjusted +3' },
+    { time: '13:42', icon: '✅', text: 'Risk profile <strong>re-calibrated</strong> after 47 trades analyzed' },
+    { time: '13:20', icon: '📈', text: 'Market regime shift: <strong>risk-on</strong> detected across majors' },
+  ],
+  shiftSeries: [],
+  heatmapData: [],
+  // NEW: Evolution history
+  evolutionHistory: [],
+  toleranceHistory: [],
+  userTolerance: 65,
+  adaptationCount: 12,
+  currentTimeframe: '1H',
+  // NEW: Correlation matrix
+  correlationMatrix: {
+    assets: ['BTC','ETH','SOL','USDT','ALT','FUT'],
+    values: [
+      [1.00, 0.87, 0.72, -0.05, 0.65, 0.43],
+      [0.87, 1.00, 0.89, -0.03, 0.71, 0.51],
+      [0.72, 0.89, 1.00, -0.08, 0.78, 0.62],
+      [-0.05,-0.03,-0.08, 1.00, 0.02,-0.11],
+      [0.65, 0.71, 0.78, 0.02, 1.00, 0.55],
+      [0.43, 0.51, 0.62,-0.11, 0.55, 1.00],
+    ]
+  },
+  // NEW: Stress test results
+  stressScenarios: {
+    crash: { title: 'Flash Crash (-30% BTC)', metrics: { portfolioDD: '-18.4%', maxRisk: 87, liqImpact: 'High', recoveryEst: '4-6 weeks', hedgeEff: '62%', stableRescue: '18%' }},
+    liquidity: { title: 'Liquidity Crisis (5x Spread)', metrics: { portfolioDD: '-9.2%', maxRisk: 74, liqImpact: 'Critical', recoveryEst: '2-3 weeks', hedgeEff: '38%', stableRescue: '18%' }},
+    blackswan: { title: 'Black Swan Event (-50% All)', metrics: { portfolioDD: '-34.1%', maxRisk: 96, liqImpact: 'Severe', recoveryEst: '8-12 weeks', hedgeEff: '71%', stableRescue: '18%' }},
+    regulation: { title: 'Regulation Shock (Ban Risk)', metrics: { portfolioDD: '-22.7%', maxRisk: 82, liqImpact: 'Moderate', recoveryEst: '6-8 weeks', hedgeEff: '45%', stableRescue: '18%' }},
+  },
+  // NEW: Decision log
+  decisions: [
+    { time: '14:33', tag: 'risk-up', tagLabel: 'Risk +', text: 'Detected <strong>increased leverage usage</strong> across 3 positions. Adjusted composite score +4.', impact: 0.72 },
+    { time: '14:29', tag: 'profile', tagLabel: 'Profile', text: 'User behavior pattern shifted: <strong>trade frequency up 34%</strong> in last hour. Re-weighting momentum factor.', impact: 0.58 },
+    { time: '14:18', tag: 'neutral', tagLabel: 'Monitor', text: 'Correlation between SOL and ETH <strong>exceeded 0.89 threshold</strong>. Flagged concentration risk.', impact: 0.45 },
+    { time: '14:05', tag: 'risk-down', tagLabel: 'Risk -', text: 'User increased stable allocation by 3%. <strong>Risk score adjusted -2</strong>. Profile trending conservative.', impact: 0.33 },
+    { time: '13:52', tag: 'profile', tagLabel: 'Profile', text: 'Session analysis: <strong>6.4h active trading</strong>. Fatigue risk factor elevated. Suggesting reduced position sizing.', impact: 0.61 },
+    { time: '13:40', tag: 'risk-up', tagLabel: 'Risk +', text: 'Market vol regime shift detected. <strong>VIX-equivalent crypto index up 22%</strong>. All positions re-scored.', impact: 0.80 },
+    { time: '13:25', tag: 'neutral', tagLabel: 'Monitor', text: 'Funding rate on SOL perp flipped negative. <strong>Hedge recommendation</strong> generated for review.', impact: 0.40 },
+    { time: '13:10', tag: 'risk-down', tagLabel: 'Risk -', text: 'Portfolio <strong>diversification improved</strong> after ALT rotation. Concentration factor reduced from 0.52 to 0.45.', impact: 0.28 },
+  ],
+};
+
+// Generate initial data
+for (let i = 0; i < 60; i++) {
+  STATE.shiftSeries.push(50 + Math.sin(i * 0.15) * 20 + (Math.random() - 0.5) * 15);
+}
+const DAYS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+const CATEGORIES = ['Trading','DeFi','Futures','Spot'];
+for (let r = 0; r < 4; r++) {
+  for (let c = 0; c < 24; c++) {
+    STATE.heatmapData.push(Math.random());
+  }
+}
+
+// Generate evolution history (40 data points)
+for (let i = 0; i < 40; i++) {
+  const base = 55 + Math.sin(i * 0.2) * 12 + (Math.random() - 0.5) * 8;
+  STATE.evolutionHistory.push(Math.max(15, Math.min(90, base)));
+  STATE.toleranceHistory.push(STATE.userTolerance + (Math.random() - 0.5) * 6);
+}
+
+// ══════════════════════════════════════════════
+// RENDER FUNCTIONS
+// ══════════════════════════════════════════════
+
+function renderGauge() {
+  const score = STATE.riskScore;
+  const pct = score / 100;
+  const totalLen = 283;
+  const offset = totalLen * (1 - pct);
+  const arc = document.getElementById('gaugeArc');
+  arc.style.transition = 'stroke-dashoffset 1.5s cubic-bezier(.4,0,.2,1)';
+  arc.setAttribute('stroke-dashoffset', offset);
+
+  const angle = -90 + pct * 180;
+  const needle = document.getElementById('gaugeNeedle');
+  needle.style.transition = 'transform 1.5s cubic-bezier(.4,0,.2,1)';
+  needle.setAttribute('transform', `rotate(${angle},110,110)`);
+
+  document.getElementById('gaugeScore').textContent = score.toFixed(1);
+  document.getElementById('gsVolatility').textContent = STATE.volatility.toFixed(2);
+  document.getElementById('gsExposure').textContent = (STATE.exposure * 100).toFixed(0) + '%';
+  document.getElementById('gsLiquidity').textContent = (STATE.liquidity * 100).toFixed(0) + '%';
+  document.getElementById('gsDrawdown').textContent = STATE.drawdown.toFixed(1) + '%';
+
+  // Risk band
+  const band = document.getElementById('riskBand');
+  band.innerHTML = '';
+  const segments = 20;
+  const activeSeg = Math.floor(pct * segments);
+  for (let i = 0; i < segments; i++) {
+    const seg = document.createElement('div');
+    seg.className = 'risk-band-seg' + (i <= activeSeg ? ' active' : '');
+    const hue = 120 - (i / segments) * 120;
+    seg.style.background = `hsl(${hue},80%,50%)`;
+    band.appendChild(seg);
+  }
+
+  // Change indicator
+  const changeEl = document.getElementById('gaugeChange');
+  const diff = (Math.random() * 6 - 2).toFixed(1);
+  const isUp = parseFloat(diff) >= 0;
+  changeEl.className = 'gauge-change ' + (isUp ? 'up' : 'down');
+  changeEl.innerHTML = `${isUp ? '&#9650;' : '&#9660;'} ${isUp ? '+' : ''}${diff} vs last hour`;
+}
+
+function renderRadar() {
+  const svg = document.getElementById('radarSvg');
+  const cx = 120, cy = 120, r = 90;
+  const factors = STATE.radarFactors;
+  const n = factors.length;
+  let html = '';
+
+  // Grid rings
+  for (let ring = 1; ring <= 4; ring++) {
+    const rr = (ring / 4) * r;
+    let pts = [];
+    for (let i = 0; i < n; i++) {
+      const a = (Math.PI * 2 * i / n) - Math.PI / 2;
+      pts.push(`${cx + Math.cos(a) * rr},${cy + Math.sin(a) * rr}`);
+    }
+    html += `<polygon points="${pts.join(' ')}" fill="none" stroke="#1e2138" stroke-width="1"/>`;
+  }
+
+  // Axes
+  for (let i = 0; i < n; i++) {
+    const a = (Math.PI * 2 * i / n) - Math.PI / 2;
+    const ex = cx + Math.cos(a) * r, ey = cy + Math.sin(a) * r;
+    html += `<line x1="${cx}" y1="${cy}" x2="${ex}" y2="${ey}" stroke="#1e2138" stroke-width="1"/>`;
+    const lx = cx + Math.cos(a) * (r + 16), ly = cy + Math.sin(a) * (r + 16);
+    html += `<text x="${lx}" y="${ly}" fill="#555572" font-size="8" font-family="Outfit,sans-serif" text-anchor="middle" dominant-baseline="middle">${factors[i].name}</text>`;
+  }
+
+  // Data polygon
+  let dataPts = [];
+  for (let i = 0; i < n; i++) {
+    const a = (Math.PI * 2 * i / n) - Math.PI / 2;
+    const dr = factors[i].value * r;
+    dataPts.push(`${cx + Math.cos(a) * dr},${cy + Math.sin(a) * dr}`);
+  }
+  html += `<polygon points="${dataPts.join(' ')}" fill="rgba(0,232,180,.12)" stroke="var(--teal)" stroke-width="2" id="radarPoly"/>`;
+
+  // Data points
+  for (let i = 0; i < n; i++) {
+    const a = (Math.PI * 2 * i / n) - Math.PI / 2;
+    const dr = factors[i].value * r;
+    const px = cx + Math.cos(a) * dr, py = cy + Math.sin(a) * dr;
+    html += `<circle cx="${px}" cy="${py}" r="4" fill="${factors[i].color}" stroke="#0c0e17" stroke-width="2"/>`;
+  }
+
+  svg.innerHTML = html;
+
+  // Legend
+  const legend = document.getElementById('radarLegend');
+  legend.innerHTML = factors.map(f =>
+    `<div class="radar-legend-item"><span class="radar-legend-dot" style="background:${f.color}"></span>${f.name} ${(f.value * 100).toFixed(0)}%</div>`
+  ).join('');
+}
+
+function renderPatterns() {
+  const grid = document.getElementById('patternGrid');
+  grid.innerHTML = STATE.patterns.map(p => `
+    <div class="pattern-item">
+      <div class="pattern-val">${p.value}</div>
+      <div class="pattern-lbl">${p.label}</div>
+      <div class="pattern-bar"><div class="pattern-bar-fill" style="width:${p.pct * 100}%;background:${p.color}"></div></div>
+    </div>
+  `).join('');
+}
+
+function renderDonut() {
+  const svg = document.getElementById('donutSvg');
+  const cx = 70, cy = 70, r = 55, sw = 16;
+  const total = STATE.portfolio.reduce((s, p) => s + p.pct, 0);
+  let cumAngle = -90;
+  let html = '';
+
+  STATE.portfolio.forEach(p => {
+    const angle = (p.pct / total) * 360;
+    const startRad = cumAngle * Math.PI / 180;
+    const endRad = (cumAngle + angle) * Math.PI / 180;
+    const largeArc = angle > 180 ? 1 : 0;
+    const x1 = cx + r * Math.cos(startRad);
+    const y1 = cy + r * Math.sin(startRad);
+    const x2 = cx + r * Math.cos(endRad);
+    const y2 = cy + r * Math.sin(endRad);
+    html += `<path d="M${x1},${y1} A${r},${r} 0 ${largeArc} 1 ${x2},${y2}" fill="none" stroke="${p.color}" stroke-width="${sw}" stroke-linecap="butt" opacity="0.85"/>`;
+    cumAngle += angle + 1.5;
+  });
+
+  svg.innerHTML = html;
+  document.getElementById('donutTotal').textContent = STATE.portfolio.length;
+
+  // List
+  const list = document.getElementById('portfolioList');
+  list.innerHTML = STATE.portfolio.map(p => `
+    <div class="portfolio-item">
+      <span class="portfolio-dot" style="background:${p.color}"></span>
+      <span class="portfolio-name">${p.name}</span>
+      <span class="portfolio-pct">${p.pct}%</span>
+      <span class="portfolio-change" style="color:${p.change >= 0 ? 'var(--green)' : 'var(--red)'}">
+        ${p.change >= 0 ? '+' : ''}${p.change}%
+      </span>
+    </div>
+  `).join('');
+}
+
+function renderHeatmap() {
+  const heatmap = document.getElementById('heatmap');
+  heatmap.style.gridTemplateRows = `repeat(${CATEGORIES.length}, 1fr)`;
+  heatmap.innerHTML = '';
+
+  STATE.heatmapData.forEach((val, idx) => {
+    const cell = document.createElement('div');
+    cell.className = 'heatmap-cell';
+    const intensity = val;
+    if (intensity > 0.7) {
+      cell.style.background = `rgba(255,71,87,${0.3 + intensity * 0.6})`;
+    } else if (intensity > 0.4) {
+      cell.style.background = `rgba(255,176,32,${0.2 + intensity * 0.5})`;
+    } else {
+      cell.style.background = `rgba(0,232,180,${0.1 + intensity * 0.4})`;
+    }
+    heatmap.appendChild(cell);
+  });
+
+  // X labels
+  const xLabels = document.getElementById('heatmapXLabels');
+  xLabels.innerHTML = '';
+  for (let i = 0; i < 24; i += 3) {
+    const span = document.createElement('span');
+    span.textContent = `${String(i).padStart(2, '0')}:00`;
+    xLabels.appendChild(span);
+  }
+
+  // Y labels
+  const yLabels = document.getElementById('heatmapYLabels');
+  yLabels.innerHTML = CATEGORIES.map(c => `<span style="font-size:.55rem;color:var(--text3)">${c}</span>`).join('');
+}
+
+function renderRecommendations() {
+  const feed = document.getElementById('recoFeed');
+  feed.innerHTML = STATE.recommendations.map(r => {
+    const confColor = r.confidence > 0.85 ? 'var(--green)' : r.confidence > 0.7 ? 'var(--amber)' : 'var(--red)';
+    return `
+      <div class="reco-item ${r.type}">
+        <div class="reco-header">
+          <span class="reco-action">${r.type}</span>
+          <span class="reco-time">${r.time}</span>
+        </div>
+        <div class="reco-title">${r.title}</div>
+        <div class="reco-reason">${r.reason}</div>
+        <div class="reco-confidence">
+          <span>Confidence</span>
+          <div class="reco-conf-bar"><div class="reco-conf-fill" style="width:${r.confidence * 100}%;background:${confColor}"></div></div>
+          <span>${(r.confidence * 100).toFixed(0)}%</span>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function renderShiftChart() {
+  const svg = document.getElementById('shiftChart');
+  const w = svg.clientWidth || 400, h = 120;
+  const data = STATE.shiftSeries;
+  const min = Math.min(...data) - 5, max = Math.max(...data) + 5;
+
+  let pathD = '';
+  data.forEach((v, i) => {
+    const x = (i / (data.length - 1)) * w;
+    const y = h - ((v - min) / (max - min)) * (h - 10) - 5;
+    pathD += (i === 0 ? 'M' : 'L') + `${x.toFixed(1)},${y.toFixed(1)}`;
+  });
+
+  let areaD = pathD + `L${w},${h}L0,${h}Z`;
+
+  svg.innerHTML = `
+    <defs>
+      <linearGradient id="shiftGrad" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="var(--teal)" stop-opacity="0.3"/>
+        <stop offset="100%" stop-color="var(--teal)" stop-opacity="0"/>
+      </linearGradient>
+    </defs>
+    <path d="${areaD}" fill="url(#shiftGrad)"/>
+    <path d="${pathD}" fill="none" stroke="var(--teal)" stroke-width="1.5"/>
+    <circle cx="${((data.length - 1) / (data.length - 1)) * w}" cy="${h - ((data[data.length - 1] - min) / (max - min)) * (h - 10) - 5}" r="3" fill="var(--teal)">
+      <animate attributeName="r" values="3;5;3" dur="2s" repeatCount="indefinite"/>
+    </circle>
+  `;
+}
+
+function renderShiftEvents() {
+  const container = document.getElementById('shiftEvents');
+  container.innerHTML = STATE.shiftEvents.map(e => `
+    <div class="shift-event">
+      <span class="shift-event-time">${e.time}</span>
+      <span class="shift-event-icon">${e.icon}</span>
+      <span class="shift-event-text">${e.text}</span>
+    </div>
+  `).join('');
+}
+
+// ══════════════════════════════════════════════
+// NEW RENDER FUNCTIONS
+// ══════════════════════════════════════════════
+
+function renderEvolution() {
+  const svg = document.getElementById('evolutionChart');
+  const w = svg.clientWidth || 600, h = 180;
+  const data = STATE.evolutionHistory;
+  const tolData = STATE.toleranceHistory;
+  const pad = { top: 10, bottom: 20, left: 0, right: 0 };
+  const plotW = w - pad.left - pad.right;
+  const plotH = h - pad.top - pad.bottom;
+
+  // Grid lines
+  let html = '';
+  for (let i = 0; i <= 4; i++) {
+    const y = pad.top + (plotH / 4) * i;
+    const val = 100 - (i * 25);
+    html += `<line x1="${pad.left}" y1="${y}" x2="${w - pad.right}" y2="${y}" stroke="#161929" stroke-width="1"/>`;
+    html += `<text x="${w - pad.right - 2}" y="${y - 3}" fill="#555572" font-size="7" text-anchor="end" font-family="JetBrains Mono,monospace">${val}</text>`;
+  }
+
+  // Tolerance band (filled area)
+  let tolPath = '';
+  tolData.forEach((v, i) => {
+    const x = pad.left + (i / (data.length - 1)) * plotW;
+    const y = pad.top + plotH - ((v - 0) / 100) * plotH;
+    tolPath += (i === 0 ? 'M' : 'L') + `${x.toFixed(1)},${y.toFixed(1)}`;
+  });
+  html += `<path d="${tolPath}" fill="none" stroke="var(--blue)" stroke-width="1.5" stroke-dasharray="4,3" opacity="0.7"/>`;
+
+  // Risk history area
+  let riskPath = '';
+  let riskArea = '';
+  data.forEach((v, i) => {
+    const x = pad.left + (i / (data.length - 1)) * plotW;
+    const y = pad.top + plotH - ((v - 0) / 100) * plotH;
+    riskPath += (i === 0 ? 'M' : 'L') + `${x.toFixed(1)},${y.toFixed(1)}`;
+    if (i === 0) riskArea += `M${x.toFixed(1)},${h - pad.bottom}`;
+    riskArea += `L${x.toFixed(1)},${y.toFixed(1)}`;
+  });
+  riskArea += `L${pad.left + plotW},${h - pad.bottom}Z`;
+
+  html += `<defs><linearGradient id="evoGrad" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0%" stop-color="var(--teal)" stop-opacity="0.2"/>
+    <stop offset="100%" stop-color="var(--teal)" stop-opacity="0"/>
+  </linearGradient></defs>`;
+  html += `<path d="${riskArea}" fill="url(#evoGrad)"/>`;
+  html += `<path d="${riskPath}" fill="none" stroke="var(--teal)" stroke-width="2"/>`;
+
+  // Current point
+  const lastX = pad.left + plotW;
+  const lastY = pad.top + plotH - ((data[data.length - 1]) / 100) * plotH;
+  html += `<circle cx="${lastX}" cy="${lastY}" r="4" fill="var(--teal)">
+    <animate attributeName="r" values="4;6;4" dur="2s" repeatCount="indefinite"/>
+  </circle>`;
+
+  svg.innerHTML = html;
+
+  // Stats
+  const avg = data.reduce((s, v) => s + v, 0) / data.length;
+  const min = Math.min(...data);
+  const max = Math.max(...data);
+  document.getElementById('evoAvg').textContent = avg.toFixed(1);
+  document.getElementById('evoMin').textContent = min.toFixed(1);
+  document.getElementById('evoMax').textContent = max.toFixed(1);
+  document.getElementById('evoAdapt').textContent = STATE.adaptationCount;
+  document.getElementById('evoAvgTrend').textContent = `+${(Math.random() * 3).toFixed(1)} trend`;
+  document.getElementById('evoMinTrend').textContent = `${(Math.random() * 5 - 3).toFixed(1)} range`;
+  document.getElementById('evoMaxTrend').textContent = `+${(Math.random() * 4).toFixed(1)} spike`;
+  document.getElementById('evoAdaptTrend').textContent = `this ${STATE.currentTimeframe}`;
+}
+
+function renderCorrelation() {
+  const container = document.getElementById('corrMatrix');
+  const assets = STATE.correlationMatrix.assets;
+  const vals = STATE.correlationMatrix.values;
+  const n = assets.length;
+
+  let html = `<div class="corr-matrix" style="grid-template-columns:repeat(${n + 1},1fr)">`;
+
+  // Header row
+  html += `<div class="corr-header"></div>`;
+  assets.forEach(a => {
+    html += `<div class="corr-header">${a}</div>`;
+  });
+
+  // Data rows
+  for (let i = 0; i < n; i++) {
+    html += `<div class="corr-header">${assets[i]}</div>`;
+    for (let j = 0; j < n; j++) {
+      const v = vals[i][j];
+      const absV = Math.abs(v);
+      let bg;
+      if (v > 0) {
+        bg = `rgba(255,71,87,${absV * 0.7})`;
+      } else if (v < 0) {
+        bg = `rgba(38,222,129,${absV * 0.7})`;
+      } else {
+        bg = 'rgba(85,85,114,0.1)';
+      }
+      const textColor = absV > 0.5 ? 'var(--text)' : 'var(--text3)';
+      html += `<div class="corr-cell" style="background:${bg};color:${textColor}" title="${assets[i]} vs ${assets[j]}: ${v.toFixed(2)}">${v.toFixed(2)}</div>`;
+    }
+  }
+  html += '</div>';
+  container.innerHTML = html;
+}
+
+function renderDecisionLog() {
+  const log = document.getElementById('decisionLog');
+  log.innerHTML = STATE.decisions.map(d => {
+    const impactColor = d.impact > 0.6 ? 'var(--red)' : d.impact > 0.35 ? 'var(--amber)' : 'var(--green)';
+    return `
+      <div class="decision-item">
+        <div class="decision-header">
+          <span class="decision-time">${d.time}</span>
+          <span class="decision-tag ${d.tag}">${d.tagLabel}</span>
+        </div>
+        <div class="decision-text">${d.text}</div>
+        <div class="decision-impact">
+          <span>Impact</span>
+          <div class="decision-impact-bar"><div class="decision-impact-fill" style="width:${d.impact * 100}%;background:${impactColor}"></div></div>
+          <span>${(d.impact * 100).toFixed(0)}%</span>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+// ══════════════════════════════════════════════
+// RENDER ALL
+// ══════════════════════════════════════════════
+function renderAll() {
+  renderGauge();
+  renderRadar();
+  renderPatterns();
+  renderDonut();
+  renderHeatmap();
+  renderRecommendations();
+  renderShiftChart();
+  renderShiftEvents();
+  renderEvolution();
+  renderCorrelation();
+  renderDecisionLog();
+}
+
+// ══════════════════════════════════════════════
+// REAL-TIME SIMULATION
+// ══════════════════════════════════════════════
+function updateClock() {
+  const now = new Date();
+  document.getElementById('headerTime').textContent =
+    now.toLocaleTimeString('en-US', { hour12: false });
+}
+
+function simulateUpdate() {
+  // Drift risk score
+  STATE.riskScore += (Math.random() - 0.48) * 1.5;
+  STATE.riskScore = Math.max(15, Math.min(90, STATE.riskScore));
+
+  STATE.volatility = Math.max(0.1, Math.min(0.98, STATE.volatility + (Math.random() - 0.5) * 0.03));
+  STATE.exposure = Math.max(0.1, Math.min(0.95, STATE.exposure + (Math.random() - 0.5) * 0.02));
+  STATE.liquidity = Math.max(0.3, Math.min(0.99, STATE.liquidity + (Math.random() - 0.5) * 0.02));
+  STATE.drawdown = Math.max(-30, Math.min(-1, STATE.drawdown + (Math.random() - 0.45) * 0.5));
+
+  // Update radar
+  STATE.radarFactors.forEach(f => {
+    f.value = Math.max(0.1, Math.min(0.95, f.value + (Math.random() - 0.5) * 0.04));
+  });
+
+  // Update portfolio changes
+  STATE.portfolio.forEach(p => {
+    p.change += (Math.random() - 0.5) * 0.3;
+    p.change = Math.round(p.change * 100) / 100;
+  });
+
+  // Update patterns
+  STATE.patterns.forEach(p => {
+    p.pct = Math.max(0.05, Math.min(0.98, p.pct + (Math.random() - 0.5) * 0.03));
+  });
+
+  // Shift series
+  STATE.shiftSeries.push(STATE.shiftSeries[STATE.shiftSeries.length - 1] + (Math.random() - 0.5) * 8);
+  if (STATE.shiftSeries.length > 60) STATE.shiftSeries.shift();
+
+  // Heatmap drift
+  STATE.heatmapData = STATE.heatmapData.map(v =>
+    Math.max(0, Math.min(1, v + (Math.random() - 0.5) * 0.08))
+  );
+
+  // Evolution history drift
+  STATE.evolutionHistory.push(STATE.riskScore);
+  if (STATE.evolutionHistory.length > 60) STATE.evolutionHistory.shift();
+  STATE.toleranceHistory.push(STATE.userTolerance + (Math.random() - 0.5) * 3);
+  if (STATE.toleranceHistory.length > 60) STATE.toleranceHistory.shift();
+  if (Math.random() > 0.85) STATE.adaptationCount++;
+
+  // Correlation matrix drift
+  for (let i = 0; i < 6; i++) {
+    for (let j = i + 1; j < 6; j++) {
+      const drift = (Math.random() - 0.5) * 0.02;
+      STATE.correlationMatrix.values[i][j] = Math.max(-1, Math.min(1, STATE.correlationMatrix.values[i][j] + drift));
+      STATE.correlationMatrix.values[j][i] = STATE.correlationMatrix.values[i][j];
+    }
+  }
+
+  renderAll();
+}
+
+// ══════════════════════════════════════════════
+// INIT
+// ══════════════════════════════════════════════
+renderAll();
+updateClock();
+setInterval(updateClock, 1000);
+setInterval(simulateUpdate, 2500);
+
+window.addEventListener('resize', () => {
+  renderShiftChart();
+  renderEvolution();
+});
+
+// ─── Timeframe Selector ───
+document.getElementById('tfSelector').addEventListener('click', (e) => {
+  if (!e.target.classList.contains('tf-btn')) return;
+  document.querySelectorAll('.tf-btn').forEach(b => b.classList.remove('active'));
+  e.target.classList.add('active');
+  STATE.currentTimeframe = e.target.dataset.tf;
+  document.getElementById('evoTimeframe').textContent = STATE.currentTimeframe;
+
+  // Regenerate evolution data for new timeframe
+  const lengths = { '1H': 40, '24H': 48, '7D': 56, '30D': 60 };
+  const len = lengths[STATE.currentTimeframe] || 40;
+  STATE.evolutionHistory = [];
+  STATE.toleranceHistory = [];
+  for (let i = 0; i < len; i++) {
+    const base = 55 + Math.sin(i * 0.15) * 15 + (Math.random() - 0.5) * 10;
+    STATE.evolutionHistory.push(Math.max(15, Math.min(90, base)));
+    STATE.toleranceHistory.push(STATE.userTolerance + (Math.random() - 0.5) * 8);
+  }
+  renderEvolution();
+});
+
+// ─── Tolerance Slider ───
+document.getElementById('toleranceSlider').addEventListener('input', (e) => {
+  STATE.userTolerance = parseInt(e.target.value);
+  document.getElementById('toleranceVal').textContent = STATE.userTolerance;
+
+  // Dynamically adjust portfolio based on tolerance
+  const t = STATE.userTolerance / 100;
+  STATE.portfolio[0].pct = Math.round(15 + t * 25); // BTC
+  STATE.portfolio[1].pct = Math.round(12 + t * 18); // ETH
+  STATE.portfolio[2].pct = Math.round(5 + t * 15);  // SOL
+  STATE.portfolio[3].pct = Math.round(30 - t * 20); // Stable
+  STATE.portfolio[4].pct = Math.round(3 + t * 12);  // ALT
+  STATE.portfolio[5].pct = Math.round(2 + t * 8);   // Futures
+
+  renderDonut();
+
+  // Update evolution tolerance line
+  STATE.toleranceHistory = STATE.toleranceHistory.map(() => STATE.userTolerance + (Math.random() - 0.5) * 4);
+  renderEvolution();
+});
+
+// ─── Stress Test Buttons ───
+document.getElementById('stressButtons').addEventListener('click', (e) => {
+  const btn = e.target.closest('.stress-btn');
+  if (!btn) return;
+
+  document.querySelectorAll('.stress-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+
+  const scenario = btn.dataset.scenario;
+  const data = STATE.stressScenarios[scenario];
+  if (!data) return;
+
+  document.getElementById('stressIdle').style.display = 'none';
+  const result = document.getElementById('stressResult');
+  result.style.display = 'block';
+  document.getElementById('stressResultTitle').textContent = data.title;
+
+  const metricsEl = document.getElementById('stressMetrics');
+  const metricLabels = {
+    portfolioDD: 'Portfolio Drawdown',
+    maxRisk: 'Peak Risk Score',
+    liqImpact: 'Liquidity Impact',
+    recoveryEst: 'Recovery Estimate',
+    hedgeEff: 'Hedge Effectiveness',
+    stableRescue: 'Stable Reserve Cover',
+  };
+  const metricColors = {
+    portfolioDD: 'var(--red)',
+    maxRisk: 'var(--amber)',
+    liqImpact: parseInt(data.metrics.maxRisk) > 80 ? 'var(--red)' : 'var(--amber)',
+    recoveryEst: 'var(--text)',
+    hedgeEff: 'var(--green)',
+    stableRescue: 'var(--blue)',
+  };
+
+  metricsEl.innerHTML = Object.entries(data.metrics).map(([key, val]) => `
+    <div class="stress-metric">
+      <div class="stress-metric-val" style="color:${metricColors[key] || 'var(--text)'}">${val}</div>
+      <div class="stress-metric-lbl">${metricLabels[key] || key}</div>
+    </div>
+  `).join('');
+
+  showNotif('warn', '💥 Stress Test Running', `Simulating: ${data.title}`);
+});
+
+// ══════════════════════════════════════════════
+// NOTIFICATION SYSTEM
+// ══════════════════════════════════════════════
+function showNotif(level, title, msg) {
+  const container = document.getElementById('notifContainer');
+  const toast = document.createElement('div');
+  toast.className = `notif-toast level-${level}`;
+  const icons = { warn:'⚠️', alert:'🚨', info:'ℹ️', success:'✅' };
+  toast.innerHTML = `
+    <div class="notif-icon">${icons[level]||'📢'}</div>
+    <div class="notif-body">
+      <div class="notif-title">${title}</div>
+      <div class="notif-msg">${msg}</div>
+    </div>
+    <button class="notif-close" onclick="dismissNotif(this.closest('.notif-toast'))">✕</button>
+    <div class="notif-bar"><div class="notif-bar-fill"></div></div>
+  `;
+  container.appendChild(toast);
+  setTimeout(() => dismissNotif(toast), 5500);
+}
+function dismissNotif(el) {
+  if (!el || el.classList.contains('exiting')) return;
+  el.classList.add('exiting');
+  setTimeout(() => el.remove(), 320);
+}
+
+// ══════════════════════════════════════════════
+// MARKET SENTIMENT
+// ══════════════════════════════════════════════
+const SENTIMENT_STATE = {
+  score: 52,
+  history: Array.from({length:20}, () => 35 + Math.random() * 50),
+  tokens: [
+    { name:'BTC', score: 61, color:'#f7931a' },
+    { name:'ETH', score: 55, color:'#627eea' },
+    { name:'SOL', score: 48, color:'#9945ff' },
+    { name:'BNB', score: 57, color:'#F0B90B' },
+    { name:'USDT', score: 72, color:'#26de81' },
+    { name:'ALT', score: 41, color:'#2d7aff' },
+  ]
+};
+
+function getSentimentLabel(s) {
+  if (s < 20) return { label:'Extreme Fear', color:'var(--red)' };
+  if (s < 40) return { label:'Fear', color:'#ff7043' };
+  if (s < 60) return { label:'Neutral', color:'var(--amber)' };
+  if (s < 80) return { label:'Greed', color:'#66bb6a' };
+  return { label:'Extreme Greed', color:'var(--green)' };
+}
+
+function renderSentiment() {
+  const { score, history, tokens } = SENTIMENT_STATE;
+  const { label, color } = getSentimentLabel(score);
+
+  const arc = document.getElementById('sentArc');
+  if (arc) {
+    const pct = score / 100;
+    arc.setAttribute('stroke-dashoffset', (157 * (1 - pct)).toFixed(1));
+  }
+  const scoreEl = document.getElementById('sentScore');
+  if (scoreEl) { scoreEl.textContent = score.toFixed(0); scoreEl.style.color = color; }
+  const lblEl = document.getElementById('sentLabel');
+  if (lblEl) { lblEl.textContent = label; lblEl.style.color = color; }
+
+  // History bars
+  const histEl = document.getElementById('sentHistory');
+  if (histEl) {
+    histEl.innerHTML = history.map(v => {
+      const c = getSentimentLabel(v).color;
+      return `<div class="sentiment-history-bar" style="height:${Math.max(10, v/100*36)}px;background:${c};opacity:.7"></div>`;
+    }).join('');
+  }
+
+  // Token scores
+  const tokEl = document.getElementById('sentTokens');
+  if (tokEl) {
+    tokEl.innerHTML = tokens.map(t => {
+      const tc = getSentimentLabel(t.score);
+      return `<div class="sent-token">
+        <div class="sent-token-icon" style="background:${t.color}22;color:${t.color}">${t.name[0]}</div>
+        <div class="sent-token-info">
+          <div class="sent-token-name">${t.name}</div>
+          <div class="sent-token-score" style="color:${tc.color}">${t.score}</div>
+          <div class="sent-token-bar"><div class="sent-token-fill" style="width:${t.score}%;background:${tc.color}"></div></div>
+        </div>
+      </div>`;
+    }).join('');
+  }
+}
+
+function updateSentiment() {
+  SENTIMENT_STATE.score = Math.max(5, Math.min(95, SENTIMENT_STATE.score + (Math.random()-0.5)*3));
+  SENTIMENT_STATE.history.push(SENTIMENT_STATE.score);
+  if (SENTIMENT_STATE.history.length > 20) SENTIMENT_STATE.history.shift();
+  SENTIMENT_STATE.tokens.forEach(t => {
+    t.score = Math.max(5, Math.min(95, t.score + (Math.random()-0.5)*4));
+  });
+  renderSentiment();
+}
+
+// ══════════════════════════════════════════════
+// AI CHAT (Claude-powered)
+// ══════════════════════════════════════════════
+const CHAT_HISTORY = [
+  { role:'assistant', content:'Hello! I\'m your Bitget AI Portfolio Analyst. I have real-time access to your risk metrics, portfolio allocation, and market data. Ask me anything about your positions or risk profile.' }
+];
+
+function getPortfolioContext() {
+  const p = STATE.portfolio;
+  const topHolding = p.reduce((a,b) => a.pct > b.pct ? a : b);
+  return `
+Current Portfolio State:
+- Composite Risk Score: ${STATE.riskScore.toFixed(1)}/100
+- Volatility: ${(STATE.volatility*100).toFixed(0)}%
+- Exposure: ${(STATE.exposure*100).toFixed(0)}%
+- Liquidity: ${(STATE.liquidity*100).toFixed(0)}%
+- Max Drawdown: ${STATE.drawdown.toFixed(1)}%
+- User Risk Tolerance: ${STATE.userTolerance}/100
+- Market Sentiment Score: ${SENTIMENT_STATE.score.toFixed(0)}/100 (${getSentimentLabel(SENTIMENT_STATE.score).label})
+Portfolio Allocation: ${p.map(x => `${x.name}: ${x.pct}%`).join(', ')}
+Top Holding: ${topHolding.name} at ${topHolding.pct}%
+Risk Factors: ${STATE.radarFactors.map(f => `${f.name}: ${(f.value*100).toFixed(0)}%`).join(', ')}
+Recent AI Adaptations: ${STATE.adaptationCount}
+`.trim();
+}
+
+function addChatMsg(role, text, isThinking=false) {
+  const container = document.getElementById('chatMessages');
+  const div = document.createElement('div');
+  div.className = `chat-msg ${role}`;
+  if (isThinking) {
+    div.id = 'chatThinking';
+    div.innerHTML = `<div class="chat-avatar ai">AI</div><div class="chat-bubble chat-thinking"><span></span><span></span><span></span></div>`;
+  } else {
+    const avatar = role === 'ai' ? `<div class="chat-avatar ai">AI</div>` : `<div class="chat-avatar user">You</div>`;
+    div.innerHTML = `${avatar}<div class="chat-bubble">${text}</div>`;
+  }
+  container.appendChild(div);
+  container.scrollTop = container.scrollHeight;
+  return div;
+}
+
+async function sendChatMessage() {
+  const input = document.getElementById('chatInput');
+  const btn = document.getElementById('chatSendBtn');
+  const text = input.value.trim();
+  if (!text || btn.disabled) return;
+
+  addChatMsg('user', text);
+  CHAT_HISTORY.push({ role:'user', content: text });
+  input.value = '';
+  btn.disabled = true;
+
+  const thinking = addChatMsg('ai', '', true);
+
+  const systemPrompt = `You are a professional crypto portfolio risk analyst integrated into the Bitget trading platform. You have access to the user's live portfolio data and provide concise, actionable advice. Always reference specific metrics from the provided data. Keep responses under 120 words and be direct. Never give generic advice — tie everything to the user's actual numbers.
+
+${getPortfolioContext()}`;
+
+  try {
+    const messages = CHAT_HISTORY.slice(-10).map(m => ({
+      role: m.role === 'assistant' ? 'assistant' : 'user',
+      content: m.content
+    }));
+
+    const resp = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ system: systemPrompt, messages })
+    });
+
+    if (!resp.ok) throw new Error(`Server error ${resp.status}`);
+    const data = await resp.json();
+    const reply = data.reply || 'Unable to get a response.';
+    thinking.remove();
+    addChatMsg('ai', reply);
+    CHAT_HISTORY.push({ role:'assistant', content: reply });
+  } catch(err) {
+    thinking.remove();
+    addChatMsg('ai', 'Connection error. Please try again.');
+  }
+  btn.disabled = false;
+}
+
+function sendQuick(q) {
+  document.getElementById('chatInput').value = q;
+  sendChatMessage();
+}
+
+document.getElementById('chatInput').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChatMessage(); }
+});
+
+// ══════════════════════════════════════════════
+// SMART RISK ALERTS
+// ══════════════════════════════════════════════
+let lastNotifRiskScore = STATE.riskScore;
+let notifCooldown = 0;
+
+function checkRiskAlerts() {
+  const score = STATE.riskScore;
+  notifCooldown = Math.max(0, notifCooldown - 1);
+  if (notifCooldown > 0) return;
+
+  if (score > 75 && lastNotifRiskScore <= 75) {
+    showNotif('alert', '🚨 High Risk Detected', `Risk score spiked to ${score.toFixed(1)}. Consider reducing exposure.`);
+    notifCooldown = 20;
+  } else if (score < 30 && lastNotifRiskScore >= 30) {
+    showNotif('success', '✅ Risk Normalized', `Risk score dropped to ${score.toFixed(1)}. Portfolio looking stable.`);
+    notifCooldown = 20;
+  } else if (STATE.volatility > 0.85 && Math.random() > 0.85) {
+    showNotif('warn', '⚠️ Volatility Spike', `Volatility at ${(STATE.volatility*100).toFixed(0)}% — elevated market risk.`);
+    notifCooldown = 15;
+  }
+  lastNotifRiskScore = score;
+}
+
+// ══════════════════════════════════════════════
+// EXTEND renderAll & simulateUpdate
+// ══════════════════════════════════════════════
+const _origRenderAll = renderAll;
+function renderAll() {
+  _origRenderAll();
+  renderSentiment();
+}
+
+const _origSimulate = simulateUpdate;
+function simulateUpdate() {
+  _origSimulate();
+  updateSentiment();
+  checkRiskAlerts();
+}
+
+// Init sentiment & show welcome notification
+renderSentiment();
+setTimeout(() => {
+  showNotif('info', '🤖 AI Engine Online', 'Adaptive risk profiling active. Portfolio monitoring started.');
+}, 1200);
+setTimeout(() => {
+  showNotif('warn', '⚠️ Elevated Volatility', `SOL correlation with ETH at 89% — concentration risk flagged.`);
+}, 4000);
+
+// ══════════════════════════════════════════════
+// PORTFOLIO SAVE / LOAD
+// ══════════════════════════════════════════════
+async function savePortfolio() {
+  const snapshot = {
+    riskScore: STATE.riskScore,
+    userTolerance: STATE.userTolerance,
+    portfolio: STATE.portfolio,
+    volatility: STATE.volatility,
+    exposure: STATE.exposure,
+    liquidity: STATE.liquidity,
+    drawdown: STATE.drawdown,
+    savedAt: new Date().toISOString(),
+  };
+  try {
+    const resp = await fetch('/api/portfolio', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(snapshot)
+    });
+    const data = await resp.json();
+    showNotif('success', '💾 Portfolio Saved', `Saved to cloud · ID: ${data.id}`);
+    localStorage.setItem('portfolioId', data.id);
+  } catch(e) {
+    showNotif('alert', 'Save Failed', 'Could not reach server. Check connection.');
+  }
+}
+
+async function loadPortfolio() {
+  const id = localStorage.getItem('portfolioId');
+  if (!id) {
+    showNotif('warn', '📂 No Saved Portfolio', 'Save your portfolio first using the Save button.');
+    return;
+  }
+  try {
+    const resp = await fetch(`/api/portfolio/${id}`);
+    if (!resp.ok) throw new Error('Not found');
+    const data = await resp.json();
+    STATE.riskScore = data.riskScore;
+    STATE.userTolerance = data.userTolerance;
+    STATE.portfolio = data.portfolio;
+    STATE.volatility = data.volatility;
+    STATE.exposure = data.exposure;
+    STATE.liquidity = data.liquidity;
+    STATE.drawdown = data.drawdown;
+    document.getElementById('toleranceSlider').value = STATE.userTolerance;
+    document.getElementById('toleranceVal').textContent = STATE.userTolerance;
+    renderAll();
+    showNotif('success', '📂 Portfolio Loaded', `Restored snapshot from ${new Date(data.savedAt).toLocaleString()}`);
+  } catch(e) {
+    showNotif('alert', 'Load Failed', 'Could not find saved portfolio.');
+  }
+}
+</script>
+</body>
+</html>

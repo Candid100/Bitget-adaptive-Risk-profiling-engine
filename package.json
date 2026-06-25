@@ -1,0 +1,19 @@
+{
+  "name": "bitget-risk-dashboard",
+  "version": "1.0.0",
+  "description": "Bitget Adaptive Risk Profiling Engine — AI-powered portfolio intelligence dashboard",
+  "main": "server/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.30.0",
+    "cors": "^2.8.5",
+    "express": "^4.19.2"
+  }
+}
